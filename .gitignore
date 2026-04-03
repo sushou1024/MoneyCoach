@@ -1,0 +1,27 @@
+.env
+
+app-backend/app-backend.test
+app-backend/bin/
+app-backend/cmd/unusedwritevet/
+
+.DS_Store
+
+stripe-information.txt
+
+mobile-app/dist
+web-frontend/node_modules
+web-frontend/.next
+web-frontend/out
+
+test-logs
+
+# Local release/test artifacts
+.tmp/
+.tools/
+artifacts/android/
+
+# Local credentials and support files
+gen-lang-client-*.json
+bug-report-*.png
+bug-report-*.jpeg
+app-backend/system-prompts.zip

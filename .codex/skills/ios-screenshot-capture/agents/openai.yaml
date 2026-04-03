@@ -1,0 +1,4 @@
+interface:
+  display_name: "iOS Screenshot Capture"
+  short_description: "Capture clean iOS simulator screenshots"
+  default_prompt: "Use $ios-screenshot-capture to capture clean, App Store-ready iOS screenshots from Simulator."

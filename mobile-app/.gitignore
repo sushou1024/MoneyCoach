@@ -1,0 +1,11 @@
+node_modules/
+.expo/
+.expo-shared/
+*.log
+*.pem
+*.keystore
+*.jks
+.DS_Store
+coverage/
+ios/
+android/

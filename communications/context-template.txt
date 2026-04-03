@@ -1,0 +1,35 @@
+I have the following PRD:
+
+"""
+<content of specs/PRD.md>
+"""
+
+And an additional doc to the PRD:
+
+"""
+<content of specs/Quanta AI 1.0完整策略库技术实现方案.md>
+"""
+
+I wrote the following prototypes docs (mobile app & backend) according to the PRD (and the additional doc):
+
+"""
+<content of prototypes/quanta-v1-prototypes.md>
+"""
+
+"""
+<content of prototypes/quanta-v1-backend-spec.md>
+"""
+
+And I've implemented the following CI files to indicate the system architecture and env vars intended to supply:
+
+.github/workflows/ci.yml
+"""
+<content of .github/workflows/ci.yml>
+"""
+
+cloudformation/backend.yaml
+"""
+<content of cloudformation/backend.yaml>
+"""
+
+I want you to review the prototypes doc and check if it follows the PRD and if there's inconsistency, ambiguity, or under-specifications. The line "Excluded in MVP" is intentional since the lack of corresponding data sources. And check if the CI files are consistent with the docs, and if the env vars are sufficient; and check if every env var is required (optional ones tend to confuse people).

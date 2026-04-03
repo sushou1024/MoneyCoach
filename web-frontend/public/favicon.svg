@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="100%" height="100%">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#0ea5e9"/>
+    </linearGradient>
+    <filter id="glow1" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Opaque square background (no transparent corners) -->
+  <rect width="120" height="120" fill="#0B1120"/>
+  
+  <!-- Keep the active mark inside a safe zone so rounded launcher masks do not crop it -->
+  <g transform="translate(12 12) scale(0.8)">
+    <!-- Subtle Data Grid -->
+    <path d="M 20 40 h 80 M 20 60 h 80 M 20 80 h 80 M 40 20 v 80 M 60 20 v 80 M 80 20 v 80" 
+          stroke="#1e293b" stroke-width="1" fill="none" opacity="0.5"/>
+    
+    <!-- The 'M' Chart (Money/Holdings) breaking out -->
+    <path d="M 20 85 L 50 45 L 70 70 L 105 15" 
+          fill="none" stroke="url(#grad1)" stroke-width="5" 
+          stroke-linecap="round" stroke-linejoin="round"/>
+          
+    <!-- Tracking Nodes -->
+    <circle cx="50" cy="45" r="3" fill="#0B1120" stroke="#10b981" stroke-width="2"/>
+    <circle cx="70" cy="70" r="3" fill="#0B1120" stroke="#0ea5e9" stroke-width="2"/>
+    
+    <!-- Alpha Node (Actionable Feed) -->
+    <circle cx="105" cy="15" r="5" fill="#0ea5e9" filter="url(#glow1)"/>
+    <circle cx="105" cy="15" r="2.5" fill="#ffffff"/>
+  </g>
+</svg>

@@ -1,0 +1,1003 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Deploys the backend service, including a managed PostgreSQL database and ECS Fargate service.
+
+Parameters:
+  ServiceName:
+    Type: String
+    Default: app-backend
+    Description: Name for the ECS service.
+  ContainerImage:
+    Type: String
+    Description: ECR image URI (account.dkr.ecr.region.amazonaws.com/repo:tag).
+  CPU:
+    Type: String
+    Default: "1024"
+    AllowedValues: ["1024", "2048", "4096"]
+    Description: vCPU units for the ECS task definition.
+  Memory:
+    Type: String
+    Default: "2048"
+    AllowedValues: ["2048", "3072", "4096", "6144", "8192"]
+    Description: Memory (MiB) for the ECS task definition.
+  DesiredCount:
+    Type: Number
+    Default: 1
+    Description: Desired ECS service task count.
+  DBInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    Description: Instance type for the PostgreSQL database.
+  DBAllocatedStorage:
+    Type: Number
+    Default: 20
+    Description: Allocated storage (GiB) for the database.
+  DBName:
+    Type: String
+    Default: appdb
+    Description: Initial database name.
+  RedisNodeType:
+    Type: String
+    Default: cache.t4g.micro
+    Description: Instance type for the Redis cache cluster.
+  HostedZoneName:
+    Type: String
+    Default: moneycoach.cc.
+    Description: Route53 hosted zone name for the API record (include trailing dot).
+  HostedZoneId:
+    Type: String
+    Description: Route53 hosted zone ID for DNS validation.
+  ApiDomainName:
+    Type: String
+    Default: api.moneycoach.cc
+    Description: Fully qualified domain name for the API (e.g. api.moneycoach.cc).
+  UploadsCorsAllowedOrigins:
+    Type: String
+    Default: "*"
+    Description: Comma-separated list of allowed origins for S3 CORS (use * for all).
+  ApiCorsAllowedOrigins:
+    Type: String
+    Default: "*"
+    Description: Comma-separated list of allowed origins for API CORS (use * for all).
+  JwtSigningSecret:
+    Type: String
+    NoEcho: true
+    Description: Secret used to sign JWT tokens.
+  GeminiApiKey:
+    Type: String
+    NoEcho: true
+    Description: Gemini API key.
+  ResendApiKey:
+    Type: String
+    NoEcho: true
+    Description: Resend API key.
+  ResendFromEmail:
+    Type: String
+    Description: Verified sender email for outbound mail.
+  CmcProApiKey:
+    Type: String
+    NoEcho: true
+    Description: CoinMarketCap API key.
+  CoingeckoProApiKey:
+    Type: String
+    NoEcho: true
+    Description: CoinGecko API key.
+  MarketstackAccessKey:
+    Type: String
+    NoEcho: true
+    Description: Marketstack API access key.
+  OpenExchangeAppId:
+    Type: String
+    NoEcho: true
+    Description: Open Exchange Rates app id.
+  BinanceApiBaseUrl:
+    Type: String
+    Default: https://api.binance.com
+    Description: Binance API base URL.
+  StripeSecretKey:
+    Type: String
+    NoEcho: true
+    Description: Stripe secret key.
+  StripeWebhookSecret:
+    Type: String
+    NoEcho: true
+    Description: Stripe webhook signing secret.
+  StripePriceIdWeekly:
+    Type: String
+    Description: Stripe weekly price ID.
+  StripePriceIdYearly:
+    Type: String
+    Description: Stripe yearly price ID.
+  AppstoreSharedSecret:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Apple App Store shared secret.
+  AppleIosBundleId:
+    Type: String
+    Default: ""
+    Description: Apple iOS bundle ID.
+  AppleIapProductIdWeekly:
+    Type: String
+    Default: ""
+    Description: Apple IAP weekly product ID.
+  AppleIapProductIdYearly:
+    Type: String
+    Default: ""
+    Description: Apple IAP yearly product ID.
+  ApnsKeyId:
+    Type: String
+    Default: ""
+    Description: APNs key ID.
+  ApnsTeamId:
+    Type: String
+    Default: ""
+    Description: APNs team ID.
+  ApnsBundleId:
+    Type: String
+    Default: ""
+    Description: APNs bundle ID (apns-topic).
+  ApnsPrivateKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: APNs private key (.p8) PEM or base64.
+  FcmServerKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: FCM server key (legacy).
+  GooglePlayPackageName:
+    Type: String
+    Default: ""
+    Description: Google Play package name.
+  GooglePlayProductWeekly:
+    Type: String
+    Default: ""
+    Description: Google Play weekly subscription product ID (legacy SKU).
+  GooglePlayProductAnnual:
+    Type: String
+    Default: ""
+    Description: Google Play annual subscription product ID (legacy SKU).
+  GooglePlayServiceAccountJsonBase64:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Base64-encoded Google Play service account JSON.
+  GoogleAllowedClientIds:
+    Type: String
+    Default: ""
+    Description: Comma-separated Google ID token audiences.
+  GooglePubSubAudience:
+    Type: String
+    Default: ""
+    Description: Google Pub/Sub push audience for Google Play RTDN webhook token validation.
+  EnableBastion:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Whether to provision an SSM-managed bastion host for database administration.
+  BastionInstanceType:
+    Type: String
+    Default: t3.micro
+    Description: EC2 instance type for the bastion host (used only when EnableBastion=true).
+  BastionAmiSsmParameter:
+    Type: String
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: SSM parameter path for the bastion AMI.
+
+Conditions:
+  HasAppstoreSharedSecret: !Not [!Equals [!Ref AppstoreSharedSecret, ""]]
+  HasApnsPrivateKey: !Not [!Equals [!Ref ApnsPrivateKey, ""]]
+  HasFcmServerKey: !Not [!Equals [!Ref FcmServerKey, ""]]
+  HasGooglePlayServiceAccountJson: !Not [!Equals [!Ref GooglePlayServiceAccountJsonBase64, ""]]
+  EnableBastionCondition: !Equals [!Ref EnableBastion, "true"]
+
+Resources:
+  DatabaseCredentials:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ServiceName}-db-credentials"
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"appuser"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\?#&%+=:'
+
+  JwtSigningSecretStore:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ServiceName}-jwt-signing-secret"
+      SecretString: !Ref JwtSigningSecret
+
+  GeminiApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ServiceName}-gemini-api-key"
+      SecretString: !Ref GeminiApiKey
+
+  ResendApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ServiceName}-resend-api-key"
+      SecretString: !Ref ResendApiKey
+
+  CmcProApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ServiceName}-cmc-pro-api-key"
+      SecretString: !Ref CmcProApiKey
+
+  CoingeckoProApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ServiceName}-coingecko-pro-api-key"
+      SecretString: !Ref CoingeckoProApiKey
+
+  MarketstackAccessKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ServiceName}-marketstack-access-key"
+      SecretString: !Ref MarketstackAccessKey
+
+  OpenExchangeAppIdSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ServiceName}-open-exchange-app-id"
+      SecretString: !Ref OpenExchangeAppId
+
+  StripeSecretKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ServiceName}-stripe-secret-key"
+      SecretString: !Ref StripeSecretKey
+
+  StripeWebhookSecretSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ServiceName}-stripe-webhook-secret"
+      SecretString: !Ref StripeWebhookSecret
+
+  AppstoreSharedSecretSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasAppstoreSharedSecret
+    Properties:
+      Name: !Sub "${ServiceName}-appstore-shared-secret"
+      SecretString: !Ref AppstoreSharedSecret
+
+  ApnsPrivateKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasApnsPrivateKey
+    Properties:
+      Name: !Sub "${ServiceName}-apns-private-key"
+      SecretString: !Ref ApnsPrivateKey
+
+  FcmServerKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasFcmServerKey
+    Properties:
+      Name: !Sub "${ServiceName}-fcm-server-key"
+      SecretString: !Ref FcmServerKey
+
+  GooglePlayServiceAccountJsonSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasGooglePlayServiceAccountJson
+    Properties:
+      Name: !Sub "${ServiceName}-google-play-service-account-json"
+      SecretString: !Ref GooglePlayServiceAccountJsonBase64
+
+  NetworkVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.100.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref NetworkVpc
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NetworkVpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.100.0.0/24
+      MapPublicIpOnLaunch: true
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NetworkVpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.100.1.0/24
+      MapPublicIpOnLaunch: true
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NetworkVpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.100.10.0/24
+      MapPublicIpOnLaunch: false
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NetworkVpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.100.11.0/24
+      MapPublicIpOnLaunch: false
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref NetworkVpc
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetA
+
+  SubnetAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetB
+
+  NatEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnetA
+
+  PrivateRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref NetworkVpc
+
+  PrivateRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      SubnetId: !Ref PrivateSubnetA
+
+  PrivateRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref NetworkVpc
+
+  PrivateRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      SubnetId: !Ref PrivateSubnetB
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow inbound HTTP/HTTPS access to the load balancer
+      VpcId: !Ref NetworkVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  EcsServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow the load balancer to reach ECS tasks
+      VpcId: !Ref NetworkVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the backend PostgreSQL database
+      VpcId: !Ref NetworkVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EcsServiceSecurityGroup
+
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: EnableBastionCondition
+    Properties:
+      GroupDescription: Security group for SSM bastion host used for database admin access
+      VpcId: !Ref NetworkVpc
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  DatabaseIngressFromBastion:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: EnableBastionCondition
+    Properties:
+      GroupId: !Ref DatabaseSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref BastionSecurityGroup
+
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the Redis cache
+      VpcId: !Ref NetworkVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref EcsServiceSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  RedisSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Subnet group for the Redis cache
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+
+  RedisCluster:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      Engine: redis
+      CacheNodeType: !Ref RedisNodeType
+      NumCacheNodes: 1
+      CacheSubnetGroupName: !Ref RedisSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref RedisSecurityGroup
+      AutoMinorVersionUpgrade: true
+
+  UploadsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods:
+              - GET
+              - PUT
+              - HEAD
+            AllowedOrigins: !Split [",", !Ref UploadsCorsAllowedOrigins]
+            AllowedHeaders:
+              - "*"
+            ExposedHeaders:
+              - ETag
+            MaxAge: 3000
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-uploads
+            Status: Enabled
+            ExpirationInDays: 30
+
+  LogosBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${ServiceName}-money-coach-${AWS::AccountId}-${AWS::Region}"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods:
+              - GET
+              - HEAD
+            AllowedOrigins: !Split [",", !Ref UploadsCorsAllowedOrigins]
+            AllowedHeaders:
+              - "*"
+            ExposedHeaders:
+              - ETag
+            MaxAge: 3000
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: false
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  LogosBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LogosBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PublicReadLogos
+            Effect: Allow
+            Principal: "*"
+            Action:
+              - s3:GetObject
+            Resource:
+              - !Sub "arn:aws:s3:::${LogosBucket}/logos/xhkg/*"
+              - !Sub "arn:aws:s3:::${LogosBucket}/logos/nasdaq/*"
+              - !Sub "arn:aws:s3:::${LogosBucket}/logos/nyse/*"
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for the backend database
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+
+  DatabaseInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${ServiceName}-db"
+      AllocatedStorage: !Ref DBAllocatedStorage
+      DBInstanceClass: !Ref DBInstanceClass
+      Engine: postgres
+      MasterUsername: !Sub "{{resolve:secretsmanager:${DatabaseCredentials}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DatabaseCredentials}:SecretString:password}}"
+      DBName: !Ref DBName
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageEncrypted: true
+      DeletionProtection: false
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ObjectStorageAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "arn:aws:s3:::${UploadsBucket}/*"
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${UploadsBucket}"
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  - !Ref JwtSigningSecretStore
+                  - !Ref GeminiApiKeySecret
+                  - !Ref ResendApiKeySecret
+                  - !Ref CmcProApiKeySecret
+                  - !Ref CoingeckoProApiKeySecret
+                  - !Ref MarketstackAccessKeySecret
+                  - !Ref OpenExchangeAppIdSecret
+                  - !Ref StripeSecretKeySecret
+                  - !Ref StripeWebhookSecretSecret
+                  - !If
+                    - HasAppstoreSharedSecret
+                    - !Ref AppstoreSharedSecretSecret
+                    - !Ref AWS::NoValue
+                  - !If
+                    - HasApnsPrivateKey
+                    - !Ref ApnsPrivateKeySecret
+                    - !Ref AWS::NoValue
+                  - !If
+                    - HasFcmServerKey
+                    - !Ref FcmServerKeySecret
+                    - !Ref AWS::NoValue
+                  - !If
+                    - HasGooglePlayServiceAccountJson
+                    - !Ref GooglePlayServiceAccountJsonSecret
+                    - !Ref AWS::NoValue
+
+  BastionRole:
+    Type: AWS::IAM::Role
+    Condition: EnableBastionCondition
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  BastionInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: EnableBastionCondition
+    Properties:
+      Roles:
+        - !Ref BastionRole
+
+  BastionHost:
+    Type: AWS::EC2::Instance
+    Condition: EnableBastionCondition
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      InstanceType: !Ref BastionInstanceType
+      ImageId: !Sub "{{resolve:ssm:${BastionAmiSsmParameter}}}"
+      SubnetId: !Ref PublicSubnetA
+      IamInstanceProfile: !Ref BastionInstanceProfile
+      SecurityGroupIds:
+        - !Ref BastionSecurityGroup
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServiceName}-db-bastion"
+
+  ServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${ServiceName}"
+      RetentionInDays: 30
+
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${ServiceName}-cluster"
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+
+  LoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref NetworkVpc
+      HealthCheckPath: /healthz
+      HealthCheckIntervalSeconds: 10
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: "443"
+            StatusCode: HTTP_301
+
+  LoadBalancerHttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref ApiCertificate
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref LoadBalancerTargetGroup
+
+  ApiCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref ApiDomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref ApiDomainName
+          HostedZoneId: !Ref HostedZoneId
+
+  ApiDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneName: !Ref HostedZoneName
+      Name: !Ref ApiDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApplicationLoadBalancer.DNSName
+        HostedZoneId: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
+
+  EcsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${ServiceName}-task"
+      Cpu: !Ref CPU
+      Memory: !Ref Memory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: !Sub "${ServiceName}-container"
+          Image: !Ref ContainerImage
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: PORT
+              Value: "8080"
+            - Name: DATABASE_URL
+              Value: !Sub >-
+                postgres://{{resolve:secretsmanager:${DatabaseCredentials}:SecretString:username}}:{{resolve:secretsmanager:${DatabaseCredentials}:SecretString:password}}@${DatabaseInstance.Endpoint.Address}:5432/${DBName}?sslmode=require
+            - Name: REDIS_URL
+              Value: !Sub "redis://${RedisCluster.RedisEndpoint.Address}:${RedisCluster.RedisEndpoint.Port}"
+            - Name: RESEND_FROM_EMAIL
+              Value: !Ref ResendFromEmail
+            - Name: BINANCE_API_BASE_URL
+              Value: !Ref BinanceApiBaseUrl
+            - Name: API_CORS_ALLOWED_ORIGINS
+              Value: !Ref ApiCorsAllowedOrigins
+            - Name: OBJECT_STORAGE_BUCKET
+              Value: !Ref UploadsBucket
+            - Name: OBJECT_STORAGE_REGION
+              Value: !Ref AWS::Region
+            - Name: LOGOS_XHKG_BASE_URL
+              Value: !Sub "https://${LogosBucket}.s3.${AWS::Region}.amazonaws.com/logos/xhkg/"
+            - Name: LOGOS_NASDAQ_BASE_URL
+              Value: !Sub "https://${LogosBucket}.s3.${AWS::Region}.amazonaws.com/logos/nasdaq/"
+            - Name: LOGOS_NYSE_BASE_URL
+              Value: !Sub "https://${LogosBucket}.s3.${AWS::Region}.amazonaws.com/logos/nyse/"
+            - Name: STRIPE_PRICE_ID_WEEKLY
+              Value: !Ref StripePriceIdWeekly
+            - Name: STRIPE_PRICE_ID_YEARLY
+              Value: !Ref StripePriceIdYearly
+            - Name: APPLE_IOS_BUNDLE_ID
+              Value: !Ref AppleIosBundleId
+            - Name: APPLE_IAP_PRODUCT_ID_WEEKLY
+              Value: !Ref AppleIapProductIdWeekly
+            - Name: APPLE_IAP_PRODUCT_ID_YEARLY
+              Value: !Ref AppleIapProductIdYearly
+            - Name: APNS_KEY_ID
+              Value: !Ref ApnsKeyId
+            - Name: APNS_TEAM_ID
+              Value: !Ref ApnsTeamId
+            - Name: APNS_BUNDLE_ID
+              Value: !Ref ApnsBundleId
+            - Name: GOOGLE_PLAY_PACKAGE_NAME
+              Value: !Ref GooglePlayPackageName
+            - Name: GOOGLE_PLAY_PRODUCT_WEEKLY
+              Value: !Ref GooglePlayProductWeekly
+            - Name: GOOGLE_PLAY_PRODUCT_ANNUAL
+              Value: !Ref GooglePlayProductAnnual
+            - Name: GOOGLE_ALLOWED_CLIENT_IDS
+              Value: !Ref GoogleAllowedClientIds
+            - Name: GOOGLE_PUBSUB_AUDIENCE
+              Value: !Ref GooglePubSubAudience
+          Secrets:
+            - Name: JWT_SIGNING_SECRET
+              ValueFrom: !Ref JwtSigningSecretStore
+            - Name: GEMINI_API_KEY
+              ValueFrom: !Ref GeminiApiKeySecret
+            - Name: RESEND_API_KEY
+              ValueFrom: !Ref ResendApiKeySecret
+            - Name: CMC_PRO_API_KEY
+              ValueFrom: !Ref CmcProApiKeySecret
+            - Name: COINGECKO_PRO_API_KEY
+              ValueFrom: !Ref CoingeckoProApiKeySecret
+            - Name: MARKETSTACK_ACCESS_KEY
+              ValueFrom: !Ref MarketstackAccessKeySecret
+            - Name: OPEN_EXCHANGE_APP_ID
+              ValueFrom: !Ref OpenExchangeAppIdSecret
+            - Name: STRIPE_SECRET_KEY
+              ValueFrom: !Ref StripeSecretKeySecret
+            - Name: STRIPE_WEBHOOK_SECRET
+              ValueFrom: !Ref StripeWebhookSecretSecret
+            - !If
+              - HasAppstoreSharedSecret
+              - Name: APPSTORE_SHARED_SECRET
+                ValueFrom: !Ref AppstoreSharedSecretSecret
+              - !Ref AWS::NoValue
+            - !If
+              - HasGooglePlayServiceAccountJson
+              - Name: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64
+                ValueFrom: !Ref GooglePlayServiceAccountJsonSecret
+              - !Ref AWS::NoValue
+            - !If
+              - HasApnsPrivateKey
+              - Name: APNS_PRIVATE_KEY
+                ValueFrom: !Ref ApnsPrivateKeySecret
+              - !Ref AWS::NoValue
+            - !If
+              - HasFcmServerKey
+              - Name: FCM_SERVER_KEY
+                ValueFrom: !Ref FcmServerKeySecret
+              - !Ref AWS::NoValue
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ServiceLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  EcsService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - LoadBalancerListener
+      - LoadBalancerHttpsListener
+      - DatabaseInstance
+      - RedisCluster
+    Properties:
+      ServiceName: !Ref ServiceName
+      Cluster: !Ref EcsCluster
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      TaskDefinition: !Ref EcsTaskDefinition
+      HealthCheckGracePeriodSeconds: 60
+      LoadBalancers:
+        - ContainerName: !Sub "${ServiceName}-container"
+          ContainerPort: 8080
+          TargetGroupArn: !Ref LoadBalancerTargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref EcsServiceSecurityGroup
+          Subnets:
+            - !Ref PrivateSubnetA
+            - !Ref PrivateSubnetB
+
+Outputs:
+  ServiceArn:
+    Description: ARN of the ECS service.
+    Value: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/${EcsCluster}/${ServiceName}"
+  ServiceUrl:
+    Description: Public URL of the load-balanced service.
+    Value: !Sub "https://${ApplicationLoadBalancer.DNSName}"
+  ApiDomainName:
+    Description: Public API domain name.
+    Value: !Ref ApiDomainName
+  ApiUrl:
+    Description: Public API URL via Route53.
+    Value: !Sub "https://${ApiDomainName}"
+  DatabaseEndpoint:
+    Description: Endpoint of the managed PostgreSQL instance.
+    Value: !GetAtt DatabaseInstance.Endpoint.Address
+  DatabaseCredentialsArn:
+    Description: ARN of the Secrets Manager entry containing DB credentials.
+    Value: !Ref DatabaseCredentials
+  RedisEndpoint:
+    Description: Redis endpoint address.
+    Value: !GetAtt RedisCluster.RedisEndpoint.Address
+  UploadsBucketName:
+    Description: S3 bucket for screenshot uploads.
+    Value: !Ref UploadsBucket
+  LogosBucketName:
+    Description: Public S3 bucket for stock logos.
+    Value: !Ref LogosBucket
+  LogosPrefix:
+    Description: Prefix for XHKG stock logos within the bucket.
+    Value: logos/xhkg/
+  LogosBaseUrl:
+    Description: Public base URL for XHKG stock logos.
+    Value: !Sub "https://${LogosBucket}.s3.${AWS::Region}.amazonaws.com/logos/xhkg/"
+  LogosNasdaqPrefix:
+    Description: Prefix for NASDAQ stock logos within the bucket.
+    Value: logos/nasdaq/
+  LogosNysePrefix:
+    Description: Prefix for NYSE stock logos within the bucket.
+    Value: logos/nyse/
+  LogosNasdaqBaseUrl:
+    Description: Public base URL for NASDAQ stock logos.
+    Value: !Sub "https://${LogosBucket}.s3.${AWS::Region}.amazonaws.com/logos/nasdaq/"
+  LogosNyseBaseUrl:
+    Description: Public base URL for NYSE stock logos.
+    Value: !Sub "https://${LogosBucket}.s3.${AWS::Region}.amazonaws.com/logos/nyse/"
+  TaskExecutionRoleArn:
+    Description: Role used by ECS to pull from ECR and emit logs.
+    Value: !GetAtt TaskExecutionRole.Arn
+  BastionInstanceId:
+    Condition: EnableBastionCondition
+    Description: EC2 instance ID for the SSM bastion host.
+    Value: !Ref BastionHost
+  BastionPortForwardCommand:
+    Condition: EnableBastionCondition
+    Description: Command to start an SSM session that forwards local port 15432 to RDS 5432.
+    Value: !Sub 'aws ssm start-session --region ${AWS::Region} --target ${BastionHost} --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters host=["${DatabaseInstance.Endpoint.Address}"],portNumber=["5432"],localPortNumber=["15432"]'

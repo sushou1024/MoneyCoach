@@ -1,0 +1,623 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Deploys the backend service, including a managed PostgreSQL database and ECS Fargate service.
+
+Parameters:
+  ServiceName:
+    Type: String
+    Default: app-backend
+    Description: Name for the ECS service.
+  ContainerImage:
+    Type: String
+    Description: ECR image URI (account.dkr.ecr.region.amazonaws.com/repo:tag).
+  CPU:
+    Type: String
+    Default: "1024"
+    AllowedValues: ["1024", "2048", "4096"]
+    Description: vCPU units for the ECS task definition.
+  Memory:
+    Type: String
+    Default: "2048"
+    AllowedValues: ["2048", "3072", "4096", "6144", "8192"]
+    Description: Memory (MiB) for the ECS task definition.
+  JWTSecret:
+    Type: String
+    NoEcho: true
+    Description: Secret used to sign JWT tokens.
+  GeminiApiKey:
+    Type: String
+    NoEcho: true
+    Description: Google Gemini API key.
+  VertexApiKey:
+    Type: String
+    NoEcho: true
+    Description: Vertex AI API key used for Veo.
+  OpenAiApiKey:
+    Type: String
+    NoEcho: true
+    Description: OpenAI API key used for GPT-5.1 responses.
+  GcpProjectId:
+    Type: String
+    Description: Google Cloud project ID that hosts Vertex AI.
+  GcpLocation:
+    Type: String
+    Default: us-central1
+    Description: Google Cloud region for Vertex AI calls.
+  VertexVeoModel:
+    Type: String
+    Default: veo-3.1-fast-generate-preview
+    Description: Primary Vertex Veo model identifier.
+  GoogleClientId:
+    Type: String
+    Description: Google OAuth client ID used for login.
+  GoogleClientSecret:
+    Type: String
+    NoEcho: true
+    Description: Google OAuth client secret used for login.
+  TokenTtlHours:
+    Type: Number
+    Default: 720
+    Description: Lifetime of issued JWTs (in hours).
+  RefreshTokenTtlHours:
+    Type: Number
+    Default: 2160
+    Description: Lifetime of refresh tokens (in hours).
+  OAuthAllowedRedirectHosts:
+    Type: String
+    Default: ""
+    Description: Optional comma-separated allowlist of redirect hosts for OAuth callbacks.
+  PublishViewerBaseUrl:
+    Type: String
+    Default: ""
+    Description: Optional viewer base URL to compose share links.
+  DBInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    Description: Instance type for the PostgreSQL database.
+  DBAllocatedStorage:
+    Type: Number
+    Default: 20
+    Description: Allocated storage (GiB) for the database.
+  DBName:
+    Type: String
+    Default: appdb
+    Description: Initial database name.
+
+Resources:
+  DatabaseCredentials:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ServiceName}-db-credentials"
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"appuser"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\?#&%+=:'
+
+  NetworkVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.100.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref NetworkVpc
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NetworkVpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.100.0.0/24
+      MapPublicIpOnLaunch: true
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NetworkVpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.100.1.0/24
+      MapPublicIpOnLaunch: true
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NetworkVpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.100.10.0/24
+      MapPublicIpOnLaunch: false
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NetworkVpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.100.11.0/24
+      MapPublicIpOnLaunch: false
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref NetworkVpc
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetA
+
+  SubnetAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetB
+
+  NatEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnetA
+
+  PrivateRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref NetworkVpc
+
+  PrivateRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      SubnetId: !Ref PrivateSubnetA
+
+  PrivateRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref NetworkVpc
+
+  PrivateRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      SubnetId: !Ref PrivateSubnetB
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow inbound HTTP access to the load balancer
+      VpcId: !Ref NetworkVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  EcsServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow the load balancer to reach ECS tasks
+      VpcId: !Ref NetworkVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the backend PostgreSQL database
+      VpcId: !Ref NetworkVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EcsServiceSecurityGroup
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for the backend database
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+
+  DatabaseInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${ServiceName}-db"
+      AllocatedStorage: !Ref DBAllocatedStorage
+      DBInstanceClass: !Ref DBInstanceClass
+      Engine: postgres
+      EngineVersion: "15"
+      MasterUsername: !Sub "{{resolve:secretsmanager:${DatabaseCredentials}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DatabaseCredentials}:SecretString:password}}"
+      DBName: !Ref DBName
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageEncrypted: true
+      DeletionProtection: false
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+
+  AssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  PublishAssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - "*"
+            AllowedMethods:
+              - GET
+              - HEAD
+            AllowedHeaders:
+              - "*"
+            ExposedHeaders:
+              - ETag
+              - Content-Length
+              - Content-Type
+              - Accept-Ranges
+            MaxAge: 86400
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  PublishOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${ServiceName}-publish-oac"
+        Description: !Sub "OAC for ${ServiceName} publish bucket"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  PublishResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "${ServiceName}-publish-cors"
+        Comment: !Sub "CORS for ${ServiceName} publish assets"
+        CorsConfig:
+          AccessControlAllowCredentials: false
+          AccessControlAllowHeaders:
+            Items:
+              - "*"
+          AccessControlAllowMethods:
+            Items:
+              - GET
+              - HEAD
+              - OPTIONS
+          AccessControlAllowOrigins:
+            Items:
+              - "*"
+          AccessControlExposeHeaders:
+            Items:
+              - ETag
+              - Content-Length
+              - Content-Type
+              - Accept-Ranges
+          AccessControlMaxAgeSec: 86400
+          OriginOverride: true
+
+  PublishDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Origins:
+          - Id: PublishS3Origin
+            DomainName: !GetAtt PublishAssetsBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+            OriginAccessControlId: !Ref PublishOriginAccessControl
+        DefaultCacheBehavior:
+          TargetOriginId: PublishS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: "658327ea-f89d-4fab-a63d-7e88639e58f6"
+          OriginRequestPolicyId: "88a5eaf4-2fd4-4709-b370-b4c650ea3fcf"
+          ResponseHeadersPolicyId: !Ref PublishResponseHeadersPolicy
+        PriceClass: PriceClass_100
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  PublishBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn:
+      - PublishDistribution
+    Properties:
+      Bucket: !Ref PublishAssetsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${PublishAssetsBucket}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${PublishDistribution}"
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EcsServiceS3Policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub arn:aws:s3:::${AssetsBucket}
+                  - !Sub arn:aws:s3:::${AssetsBucket}/*
+                  - !Sub arn:aws:s3:::${PublishAssetsBucket}
+                  - !Sub arn:aws:s3:::${PublishAssetsBucket}/*
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${ServiceName}"
+      RetentionInDays: 30
+
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${ServiceName}-cluster"
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+
+  LoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref NetworkVpc
+      HealthCheckPath: /healthz
+      HealthCheckIntervalSeconds: 10
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref LoadBalancerTargetGroup
+
+  EcsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${ServiceName}-task"
+      Cpu: !Ref CPU
+      Memory: !Ref Memory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: !Sub "${ServiceName}-container"
+          Image: !Ref ContainerImage
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: PORT
+              Value: "8080"
+            - Name: DATABASE_URL
+              Value: !Sub >-
+                postgres://{{resolve:secretsmanager:${DatabaseCredentials}:SecretString:username}}:{{resolve:secretsmanager:${DatabaseCredentials}:SecretString:password}}@${DatabaseInstance.Endpoint.Address}:5432/${DBName}?sslmode=require
+            - Name: JWT_SECRET
+              Value: !Ref JWTSecret
+            - Name: GEMINI_API_KEY
+              Value: !Ref GeminiApiKey
+            - Name: VERTEX_API_KEY
+              Value: !Ref VertexApiKey
+            - Name: OPENAI_API_KEY
+              Value: !Ref OpenAiApiKey
+            - Name: GCP_PROJECT_ID
+              Value: !Ref GcpProjectId
+            - Name: GCP_LOCATION
+              Value: !Ref GcpLocation
+            - Name: VERTEX_VEO_MODEL
+              Value: !Ref VertexVeoModel
+            - Name: GOOGLE_CLIENT_ID
+              Value: !Ref GoogleClientId
+            - Name: GOOGLE_CLIENT_SECRET
+              Value: !Ref GoogleClientSecret
+            - Name: TOKEN_TTL_HOURS
+              Value: !Ref TokenTtlHours
+            - Name: REFRESH_TOKEN_TTL_HOURS
+              Value: !Ref RefreshTokenTtlHours
+            - Name: OAUTH_ALLOWED_REDIRECT_HOSTS
+              Value: !Ref OAuthAllowedRedirectHosts
+            - Name: S3_BUCKET
+              Value: !Ref AssetsBucket
+            - Name: S3_REGION
+              Value: !Ref AWS::Region
+            - Name: S3_PREFIX
+              Value: "assets"
+            - Name: S3_BASE_URL
+              Value: ""
+            - Name: S3_ENDPOINT
+              Value: ""
+            - Name: S3_FORCE_PATH_STYLE
+              Value: "false"
+            - Name: PUBLISH_S3_BUCKET
+              Value: !Ref PublishAssetsBucket
+            - Name: PUBLISH_S3_REGION
+              Value: !Ref AWS::Region
+            - Name: PUBLISH_S3_PREFIX
+              Value: "publish"
+            - Name: PUBLISH_S3_CDN_DOMAIN
+              Value: !GetAtt PublishDistribution.DomainName
+            - Name: PUBLISH_S3_ENDPOINT
+              Value: ""
+            - Name: PUBLISH_S3_FORCE_PATH_STYLE
+              Value: "false"
+            - Name: PUBLISH_VIEWER_BASE_URL
+              Value: !Ref PublishViewerBaseUrl
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ServiceLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  EcsService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - LoadBalancerListener
+      - DatabaseInstance
+    Properties:
+      ServiceName: !Ref ServiceName
+      Cluster: !Ref EcsCluster
+      DesiredCount: 1
+      LaunchType: FARGATE
+      TaskDefinition: !Ref EcsTaskDefinition
+      HealthCheckGracePeriodSeconds: 60
+      LoadBalancers:
+        - ContainerName: !Sub "${ServiceName}-container"
+          ContainerPort: 8080
+          TargetGroupArn: !Ref LoadBalancerTargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref EcsServiceSecurityGroup
+          Subnets:
+            - !Ref PrivateSubnetA
+            - !Ref PrivateSubnetB
+
+Outputs:
+  ServiceArn:
+    Description: ARN of the ECS service.
+    Value: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/${EcsCluster}/${ServiceName}"
+  ServiceUrl:
+    Description: Public URL of the load-balanced service.
+    Value: !Sub "http://${ApplicationLoadBalancer.DNSName}"
+  DatabaseEndpoint:
+    Description: Endpoint of the managed PostgreSQL instance.
+    Value: !GetAtt DatabaseInstance.Endpoint.Address
+  DatabaseCredentialsArn:
+    Description: ARN of the Secrets Manager entry containing DB credentials.
+    Value: !Ref DatabaseCredentials
+  AssetsBucketName:
+    Description: S3 bucket storing generated workflow assets.
+    Value: !Ref AssetsBucket
+  PublishBucketName:
+    Description: S3 bucket storing published game assets.
+    Value: !Ref PublishAssetsBucket
+  PublishCDNDomain:
+    Description: CloudFront domain for published assets.
+    Value: !GetAtt PublishDistribution.DomainName
+  TaskExecutionRoleArn:
+    Description: Role used by ECS to pull from ECR and emit logs.
+    Value: !GetAtt TaskExecutionRole.Arn

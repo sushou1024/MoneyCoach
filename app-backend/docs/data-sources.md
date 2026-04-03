@@ -1,0 +1,26 @@
+# Data Sources and APIs (MVP)
+
+- Crypto pricing/metadata: CoinGecko (Pro API)
+  - Required: `/coins/list`, `/simple/price`, `/coins/markets`, `/coins/{id}/market_chart/range` (daily OHLCV is derived from range data)
+  - Optional: `/coins/{id}`
+  - Canonical crypto asset_key: `crypto:cg:{coin_id}`
+  - Stablecoins are pegged at USD 1.00 in MVP (ignore spot deviations).
+- Crypto intraday market data: Binance Spot
+  - Required: `/api/v3/klines`
+  - Optional: `/api/v3/ticker` (rolling window stats)
+- Crypto futures funding + mark price (S16): Binance Futures
+  - Required: `/fapi/v1/premiumIndex`
+  - Optional: `/fapi/v1/fundingRate`
+- Stocks/ETFs pricing + symbols: Marketstack v2
+  - Required: `/tickers/{symbol}`, `/eod`, `/eod/latest`
+  - Optional: `/intraday`, `/intraday/latest`
+- FX rates + currency list: Open Exchange Rates
+  - Required: `/latest.json`, `/currencies.json`
+- Candlesticks and FX persistence
+  - Candlestick data is stored in Postgres (`market_candlesticks`) in native quote currency and never expires.
+  - FX daily rates are stored in Postgres (`fx_daily_rates`) keyed by UTC date and reused without re-calling the API.
+  - Report plan chart_series are pinned to the snapshot valuation date; non-portfolio plan endpoints only fetch the plan asset series.
+  - Candlestick tail gaps near the range end are treated as stale and cached (negative cache) to avoid repeated upstream fetches.
+- Post-MVP (sentiment): CoinMarketCap Fear & Greed
+  - `/v3/fear-and-greed/latest`
+  - `/v3/fear-and-greed/historical`

@@ -1,0 +1,226 @@
+name: Build, Test, Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app-backend/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "app-backend/**"
+      - ".github/workflows/ci.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+  STACK_NAME: ${{ vars.STACK_NAME || 'app-backend' }}
+  SERVICE_NAME: ${{ vars.SERVICE_NAME || 'app-backend' }}
+  ECR_REPO: ${{ vars.ECR_REPO || 'app-backend' }}
+  CFN_TEMPLATE: ${{ vars.CFN_TEMPLATE || 'app-backend/cloudformation/backend.yaml' }}
+  DOCKER_BUILD_CONTEXT: ${{ vars.DOCKER_BUILD_CONTEXT || 'app-backend' }}
+  DOCKERFILE_PATH: ${{ vars.DOCKERFILE_PATH || 'app-backend/Dockerfile' }}
+  CPU: ${{ vars.CPU || '1024' }}
+  MEMORY: ${{ vars.MEMORY || '2048' }}
+  DESIRED_COUNT: ${{ vars.DESIRED_COUNT || '1' }}
+  DB_INSTANCE_CLASS: ${{ vars.DB_INSTANCE_CLASS || 'db.t4g.micro' }}
+  DB_ALLOCATED_STORAGE: ${{ vars.DB_ALLOCATED_STORAGE || '20' }}
+  DB_NAME: ${{ vars.DB_NAME || 'appdb' }}
+  REDIS_NODE_TYPE: ${{ vars.REDIS_NODE_TYPE || 'cache.t4g.micro' }}
+  ENABLE_BASTION: ${{ vars.ENABLE_BASTION || 'false' }}
+  BASTION_INSTANCE_TYPE: ${{ vars.BASTION_INSTANCE_TYPE || 't3.micro' }}
+  UPLOADS_CORS_ALLOWED_ORIGINS: ${{ vars.UPLOADS_CORS_ALLOWED_ORIGINS || '*' }}
+  API_CORS_ALLOWED_ORIGINS: ${{ vars.API_CORS_ALLOWED_ORIGINS || '*' }}
+  BINANCE_API_BASE_URL: ${{ vars.BINANCE_API_BASE_URL || 'https://api.binance.com' }}
+  GOOGLE_ALLOWED_CLIENT_IDS: ${{ vars.GOOGLE_ALLOWED_CLIENT_IDS || '' }}
+  GOOGLE_PUBSUB_AUDIENCE: ${{ vars.GOOGLE_PUBSUB_AUDIENCE || '' }}
+  APNS_KEY_ID: ${{ vars.APNS_KEY_ID || '' }}
+  APNS_TEAM_ID: ${{ vars.APNS_TEAM_ID || '' }}
+  APNS_BUNDLE_ID: ${{ vars.APNS_BUNDLE_ID || '' }}
+  HOSTED_ZONE_NAME: ${{ vars.HOSTED_ZONE_NAME || 'moneycoach.cc.' }}
+  API_DOMAIN_NAME: ${{ vars.API_DOMAIN_NAME || 'api.moneycoach.cc' }}
+  HOSTED_ZONE_ID: ${{ vars.HOSTED_ZONE_ID || '' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        if: ${{ hashFiles('app-backend/go.mod') != '' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      JWT_SIGNING_SECRET: ${{ secrets.JWT_SIGNING_SECRET }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      CMC_PRO_API_KEY: ${{ secrets.CMC_PRO_API_KEY }}
+      COINGECKO_PRO_API_KEY: ${{ secrets.COINGECKO_PRO_API_KEY }}
+      MARKETSTACK_ACCESS_KEY: ${{ secrets.MARKETSTACK_ACCESS_KEY }}
+      OPEN_EXCHANGE_APP_ID: ${{ secrets.OPEN_EXCHANGE_APP_ID }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      APPSTORE_SHARED_SECRET: ${{ secrets.APPSTORE_SHARED_SECRET }}
+      APNS_PRIVATE_KEY: ${{ secrets.APNS_PRIVATE_KEY }}
+      FCM_SERVER_KEY: ${{ secrets.FCM_SERVER_KEY }}
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}
+      RESEND_FROM_EMAIL: ${{ vars.RESEND_FROM_EMAIL }}
+      STRIPE_PRICE_ID_WEEKLY: ${{ vars.STRIPE_PRICE_ID_WEEKLY }}
+      STRIPE_PRICE_ID_YEARLY: ${{ vars.STRIPE_PRICE_ID_YEARLY }}
+      APPLE_IOS_BUNDLE_ID: ${{ vars.APPLE_IOS_BUNDLE_ID }}
+      APPLE_IAP_PRODUCT_ID_WEEKLY: ${{ vars.APPLE_IAP_PRODUCT_ID_WEEKLY }}
+      APPLE_IAP_PRODUCT_ID_YEARLY: ${{ vars.APPLE_IAP_PRODUCT_ID_YEARLY }}
+      GOOGLE_PLAY_PACKAGE_NAME: ${{ vars.GOOGLE_PLAY_PACKAGE_NAME }}
+      GOOGLE_PLAY_PRODUCT_WEEKLY: ${{ vars.GOOGLE_PLAY_PRODUCT_WEEKLY }}
+      GOOGLE_PLAY_PRODUCT_ANNUAL: ${{ vars.GOOGLE_PLAY_PRODUCT_ANNUAL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect logo changes
+        id: logo_changes
+        run: |
+          BASE_SHA="${{ github.event.before }}"
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            if git rev-parse HEAD~1 >/dev/null 2>&1; then
+              BASE_SHA=$(git rev-parse HEAD~1)
+            else
+              echo "changed=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
+          if git diff --name-only "$BASE_SHA" "$GITHUB_SHA" -- app-backend/data/logos/ | grep -q .; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Create ECR repository if missing
+        run: |
+          aws ecr describe-repositories --repository-names "$ECR_REPO" >/dev/null 2>&1 || \
+          aws ecr create-repository --repository-name "$ECR_REPO" >/dev/null
+
+      - name: Build and push image
+        run: |
+          IMAGE_URI="${{ steps.ecr.outputs.registry }}/$ECR_REPO:sha-${GITHUB_SHA}"
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          docker build -f "$DOCKERFILE_PATH" -t "$IMAGE_URI" "$DOCKER_BUILD_CONTEXT"
+          docker push "$IMAGE_URI"
+
+      - name: Deploy CloudFormation stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name "$STACK_NAME" \
+            --template-file "$CFN_TEMPLATE" \
+            --capabilities CAPABILITY_NAMED_IAM CAPABILITY_IAM \
+            --parameter-overrides \
+              ServiceName="$SERVICE_NAME" \
+              ContainerImage="$IMAGE_URI" \
+              CPU="$CPU" \
+              Memory="$MEMORY" \
+              DesiredCount="$DESIRED_COUNT" \
+              DBInstanceClass="$DB_INSTANCE_CLASS" \
+              DBAllocatedStorage="$DB_ALLOCATED_STORAGE" \
+              DBName="$DB_NAME" \
+              RedisNodeType="$REDIS_NODE_TYPE" \
+              EnableBastion="$ENABLE_BASTION" \
+              BastionInstanceType="$BASTION_INSTANCE_TYPE" \
+              HostedZoneName="$HOSTED_ZONE_NAME" \
+              ApiDomainName="$API_DOMAIN_NAME" \
+              HostedZoneId="$HOSTED_ZONE_ID" \
+              UploadsCorsAllowedOrigins="$UPLOADS_CORS_ALLOWED_ORIGINS" \
+              ApiCorsAllowedOrigins="$API_CORS_ALLOWED_ORIGINS" \
+              JwtSigningSecret="$JWT_SIGNING_SECRET" \
+              GeminiApiKey="$GEMINI_API_KEY" \
+              ResendApiKey="$RESEND_API_KEY" \
+              ResendFromEmail="$RESEND_FROM_EMAIL" \
+              CmcProApiKey="$CMC_PRO_API_KEY" \
+              CoingeckoProApiKey="$COINGECKO_PRO_API_KEY" \
+              MarketstackAccessKey="$MARKETSTACK_ACCESS_KEY" \
+              OpenExchangeAppId="$OPEN_EXCHANGE_APP_ID" \
+              BinanceApiBaseUrl="$BINANCE_API_BASE_URL" \
+              StripeSecretKey="$STRIPE_SECRET_KEY" \
+              StripeWebhookSecret="$STRIPE_WEBHOOK_SECRET" \
+              StripePriceIdWeekly="$STRIPE_PRICE_ID_WEEKLY" \
+              StripePriceIdYearly="$STRIPE_PRICE_ID_YEARLY" \
+              AppstoreSharedSecret="$APPSTORE_SHARED_SECRET" \
+              AppleIosBundleId="$APPLE_IOS_BUNDLE_ID" \
+              AppleIapProductIdWeekly="$APPLE_IAP_PRODUCT_ID_WEEKLY" \
+              AppleIapProductIdYearly="$APPLE_IAP_PRODUCT_ID_YEARLY" \
+              ApnsKeyId="$APNS_KEY_ID" \
+              ApnsTeamId="$APNS_TEAM_ID" \
+              ApnsBundleId="$APNS_BUNDLE_ID" \
+              ApnsPrivateKey="$APNS_PRIVATE_KEY" \
+              FcmServerKey="$FCM_SERVER_KEY" \
+              GooglePlayPackageName="$GOOGLE_PLAY_PACKAGE_NAME" \
+              GooglePlayProductWeekly="$GOOGLE_PLAY_PRODUCT_WEEKLY" \
+              GooglePlayProductAnnual="$GOOGLE_PLAY_PRODUCT_ANNUAL" \
+              GooglePlayServiceAccountJsonBase64="$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64" \
+              GoogleAllowedClientIds="$GOOGLE_ALLOWED_CLIENT_IDS" \
+              GooglePubSubAudience="$GOOGLE_PUBSUB_AUDIENCE"
+
+      - name: Sync stock logos to S3
+        if: steps.logo_changes.outputs.changed == 'true'
+        run: |
+          LOGOS_BUCKET=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='LogosBucketName'].OutputValue" --output text)
+          if [ -z "$LOGOS_BUCKET" ] || [ "$LOGOS_BUCKET" = "None" ]; then
+            echo "LogosBucketName output missing from stack $STACK_NAME"
+            exit 1
+          fi
+
+          if [ ! -d "app-backend/data/logos/xhkg" ]; then
+            echo "Logo directory app-backend/data/logos/xhkg not found"
+            exit 1
+          fi
+
+          for EXCHANGE in xhkg nasdaq nyse; do
+            if [ ! -d "app-backend/data/logos/$EXCHANGE" ]; then
+              echo "Logo directory app-backend/data/logos/$EXCHANGE not found"
+              exit 1
+            fi
+
+            aws s3 sync "app-backend/data/logos/$EXCHANGE" "s3://$LOGOS_BUCKET/logos/$EXCHANGE/" \
+              --exclude "logo-mapping.json" \
+              --cache-control "public, max-age=31536000, immutable"
+          done
+
+          if [ ! -f "app-backend/data/logos/xhkg/logo-mapping.json" ]; then
+            echo "Logo mapping app-backend/data/logos/xhkg/logo-mapping.json not found"
+            exit 1
+          fi
+
+          aws s3 cp "app-backend/data/logos/xhkg/logo-mapping.json" \
+            "s3://$LOGOS_BUCKET/logos/xhkg/logo-mapping.json" \
+            --cache-control "public, max-age=43200" \
+            --content-type "application/json"
+
+      - name: Show stack outputs
+        run: |
+          aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs" --output json | jq -r '.[] | "\(.OutputKey)=\(.OutputValue)"'

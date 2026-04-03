@@ -1,0 +1,121 @@
+name: Build, Test, Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-west-2
+  STACK_NAME: app-backend
+  SERVICE_NAME: app-backend
+  ECR_REPO: app-backend
+  CFN_TEMPLATE: cloudformation/backend.yaml
+  CPU: "1024"
+  MEMORY: "2048"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Verify formatting
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+
+      - name: Run tests
+        run: |
+          mkdir -p .cache
+          GOCACHE=$(pwd)/.cache go test ./...
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      VERTEX_API_KEY: ${{ secrets.VERTEX_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_LOCATION: ${{ secrets.GCP_LOCATION }}
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      PUBLISH_VIEWER_BASE_URL: ${{ secrets.PUBLISH_VIEWER_BASE_URL }}
+      TOKEN_TTL_HOURS: ${{ vars.TOKEN_TTL_HOURS }}
+      OAUTH_ALLOWED_REDIRECT_HOSTS: ${{ vars.OAUTH_ALLOWED_REDIRECT_HOSTS }}
+      REFRESH_TOKEN_TTL_HOURS: ${{ vars.REFRESH_TOKEN_TTL_HOURS }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Create ECR repository if missing
+        run: |
+          aws ecr describe-repositories --repository-names "$ECR_REPO" >/dev/null 2>&1 || \
+          aws ecr create-repository --repository-name "$ECR_REPO" >/dev/null
+
+      - name: Build and push image
+        run: |
+          IMAGE_URI="${{ steps.ecr.outputs.registry }}/$ECR_REPO:sha-${GITHUB_SHA}"
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+
+      - name: Deploy CloudFormation stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name "$STACK_NAME" \
+            --template-file "$CFN_TEMPLATE" \
+            --capabilities CAPABILITY_NAMED_IAM CAPABILITY_IAM \
+            --parameter-overrides \
+              ServiceName=$SERVICE_NAME \
+              ContainerImage="${IMAGE_URI}" \
+              JWTSecret="$JWT_SECRET" \
+              GeminiApiKey="$GEMINI_API_KEY" \
+              VertexApiKey="$VERTEX_API_KEY" \
+              OpenAiApiKey="$OPENAI_API_KEY" \
+              GcpProjectId="$GCP_PROJECT_ID" \
+              GcpLocation="$GCP_LOCATION" \
+              GoogleClientId="$GOOGLE_CLIENT_ID" \
+              GoogleClientSecret="$GOOGLE_CLIENT_SECRET" \
+              PublishViewerBaseUrl="${PUBLISH_VIEWER_BASE_URL:-}" \
+              TokenTtlHours="${TOKEN_TTL_HOURS:-720}" \
+              RefreshTokenTtlHours="${REFRESH_TOKEN_TTL_HOURS:-2160}" \
+              OAuthAllowedRedirectHosts="${OAUTH_ALLOWED_REDIRECT_HOSTS:-}" \
+              CPU=$CPU \
+              Memory=$MEMORY
+
+      - name: Show stack outputs
+        run: |
+          aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs" --output json | jq -r '.[] | "\(.OutputKey)=\(.OutputValue)"'

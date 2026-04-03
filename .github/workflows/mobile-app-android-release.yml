@@ -1,0 +1,175 @@
+name: Mobile App Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      submit_to_play:
+        description: Upload the built AAB to Google Play.
+        required: true
+        type: boolean
+        default: false
+      track:
+        description: Google Play track.
+        required: false
+        type: choice
+        options:
+          - internal
+          - alpha
+          - beta
+          - production
+        default: internal
+      release_status:
+        description: Google Play release status.
+        required: false
+        type: choice
+        options:
+          - draft
+          - completed
+          - inProgress
+          - halted
+        default: draft
+      version_code:
+        description: Optional Android versionCode override (integer).
+        required: false
+        type: string
+      version_name:
+        description: Optional Android versionName override (for example 1.2.3).
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release-android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile-app
+    env:
+      ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+      ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+      ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+      ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}
+      GOOGLE_PLAY_PACKAGE_NAME: ${{ vars.GOOGLE_PLAY_PACKAGE_NAME }}
+      EXPO_PUBLIC_API_BASE_URL: ${{ vars.EXPO_PUBLIC_API_BASE_URL }}
+      EXPO_PUBLIC_API_BASE_URL_ANDROID: ${{ vars.EXPO_PUBLIC_API_BASE_URL_ANDROID }}
+      EXPO_PUBLIC_PWA_URL: ${{ vars.EXPO_PUBLIC_PWA_URL }}
+      EXPO_PUBLIC_TERMS_URL: ${{ vars.EXPO_PUBLIC_TERMS_URL }}
+      EXPO_PUBLIC_PRIVACY_URL: ${{ vars.EXPO_PUBLIC_PRIVACY_URL }}
+      EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+      EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+      EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID_DEBUG: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID_DEBUG }}
+      EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID }}
+      EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+      EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+      EXPO_PUBLIC_APPLE_IAP_PRODUCT_ID_WEEKLY: ${{ vars.EXPO_PUBLIC_APPLE_IAP_PRODUCT_ID_WEEKLY }}
+      EXPO_PUBLIC_APPLE_IAP_PRODUCT_ID_YEARLY: ${{ vars.EXPO_PUBLIC_APPLE_IAP_PRODUCT_ID_YEARLY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: mobile-app/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Validate required configuration
+        run: |
+          missing=()
+          require_var() {
+            local key="$1"
+            if [ -z "${!key:-}" ]; then
+              missing+=("$key")
+            fi
+          }
+
+          require_var ANDROID_UPLOAD_KEYSTORE_BASE64
+          require_var ANDROID_UPLOAD_STORE_PASSWORD
+          require_var ANDROID_UPLOAD_KEY_ALIAS
+          require_var ANDROID_UPLOAD_KEY_PASSWORD
+          require_var EXPO_PUBLIC_API_BASE_URL
+          require_var EXPO_PUBLIC_TERMS_URL
+          require_var EXPO_PUBLIC_PRIVACY_URL
+          require_var EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+          require_var EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID
+          require_var EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY
+
+          if [ "${{ inputs.submit_to_play }}" = "true" ]; then
+            require_var GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64
+            require_var GOOGLE_PLAY_PACKAGE_NAME
+          fi
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Missing required GitHub Actions Secrets/Variables: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Android native project
+        run: CI=1 npx expo prebuild --platform android --clean
+
+      - name: Patch Android Gradle release signing config
+        run: node scripts/prepare-android-release-gradle.mjs
+
+      - name: Prepare signing keystore
+        run: |
+          echo "$ANDROID_UPLOAD_KEYSTORE_BASE64" | base64 --decode > android/app/moneycoach-upload.jks
+          chmod 600 android/app/moneycoach-upload.jks
+
+      - name: Resolve Android version metadata
+        id: version
+        run: |
+          VERSION_CODE="${{ inputs.version_code }}"
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE="${{ github.run_number }}"
+          fi
+
+          VERSION_NAME="${{ inputs.version_name }}"
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME=$(node -p "require('./package.json').version")
+          fi
+
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed Android App Bundle (AAB)
+        run: |
+          cd android
+          ./gradlew :app:bundleRelease \
+            -PMONEYCOACH_UPLOAD_STORE_FILE=moneycoach-upload.jks \
+            -PMONEYCOACH_UPLOAD_STORE_PASSWORD="$ANDROID_UPLOAD_STORE_PASSWORD" \
+            -PMONEYCOACH_UPLOAD_KEY_ALIAS="$ANDROID_UPLOAD_KEY_ALIAS" \
+            -PMONEYCOACH_UPLOAD_KEY_PASSWORD="$ANDROID_UPLOAD_KEY_PASSWORD" \
+            -PMONEYCOACH_VERSION_CODE="${{ steps.version.outputs.version_code }}" \
+            -PMONEYCOACH_VERSION_NAME="${{ steps.version.outputs.version_name }}"
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-${{ steps.version.outputs.version_code }}
+          path: mobile-app/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+      - name: Decode Google Play service account
+        if: ${{ inputs.submit_to_play }}
+        run: |
+          echo "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64" | base64 --decode > "$RUNNER_TEMP/google-play-service-account.json"
+
+      - name: Upload AAB to Google Play
+        if: ${{ inputs.submit_to_play }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJson: ${{ runner.temp }}/google-play-service-account.json
+          packageName: ${{ vars.GOOGLE_PLAY_PACKAGE_NAME }}
+          releaseFiles: mobile-app/android/app/build/outputs/bundle/release/app-release.aab
+          track: ${{ inputs.track }}
+          status: ${{ inputs.release_status }}

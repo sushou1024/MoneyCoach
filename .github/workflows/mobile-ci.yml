@@ -1,0 +1,36 @@
+name: Mobile App CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mobile-app/**"
+      - ".github/workflows/mobile-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "mobile-app/**"
+      - ".github/workflows/mobile-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: mobile-app/package.json
+
+      - name: Install dependencies
+        run: |
+          cd mobile-app
+          npm install --no-fund --no-audit
+
+      - name: Run tests
+        run: |
+          cd mobile-app
+          npm test

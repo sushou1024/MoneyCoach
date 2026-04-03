@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-quanta}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quanta}
+      POSTGRES_DB: ${POSTGRES_DB:-quanta}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: ${PORT:-8080}
+      DATABASE_URL: ${DATABASE_URL:-postgres://quanta:quanta@host.docker.internal:5432/quanta?sslmode=disable}
+      REDIS_URL: ${REDIS_URL:-redis://host.docker.internal:6379/0}
+      OBJECT_STORAGE_MODE: ${OBJECT_STORAGE_MODE:-local}
+      OBJECT_STORAGE_LOCAL_DIR: ${OBJECT_STORAGE_LOCAL_DIR:-/data/uploads}
+      LOCAL_STORAGE_BASE_URL: ${LOCAL_STORAGE_BASE_URL:-http://localhost:8080}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION}
+      JWT_SIGNING_SECRET: ${JWT_SIGNING_SECRET}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL}
+      EMAIL_OTP_MODE: ${EMAIL_OTP_MODE:-debug}
+      BILLING_DEV_MODE: ${BILLING_DEV_MODE:-true}
+      COINGECKO_PRO_API_KEY: ${COINGECKO_PRO_API_KEY}
+      CMC_PRO_API_KEY: ${CMC_PRO_API_KEY}
+      MARKETSTACK_ACCESS_KEY: ${MARKETSTACK_ACCESS_KEY}
+      OPEN_EXCHANGE_APP_ID: ${OPEN_EXCHANGE_APP_ID}
+      LOGOS_XHKG_BASE_URL: ${LOGOS_XHKG_BASE_URL}
+      LOGOS_NASDAQ_BASE_URL: ${LOGOS_NASDAQ_BASE_URL}
+      LOGOS_NYSE_BASE_URL: ${LOGOS_NYSE_BASE_URL}
+      BINANCE_API_BASE_URL: ${BINANCE_API_BASE_URL:-https://api.binance.com}
+      GOOGLE_ALLOWED_CLIENT_IDS: ${GOOGLE_ALLOWED_CLIENT_IDS}
+      APPLE_IOS_BUNDLE_ID: ${APPLE_IOS_BUNDLE_ID:-}
+      APNS_KEY_ID: ${APNS_KEY_ID:-}
+      APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+      APNS_PRIVATE_KEY: ${APNS_PRIVATE_KEY:-}
+      APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-}
+      FCM_SERVER_KEY: ${FCM_SERVER_KEY:-}
+      GOOGLE_PLAY_PACKAGE_NAME: ${GOOGLE_PLAY_PACKAGE_NAME:-}
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: ${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64:-}
+      GOOGLE_PLAY_PRODUCT_WEEKLY: ${GOOGLE_PLAY_PRODUCT_WEEKLY:-}
+      GOOGLE_PLAY_PRODUCT_ANNUAL: ${GOOGLE_PLAY_PRODUCT_ANNUAL:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+    volumes:
+      - local_uploads:/data/uploads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  postgres_data:
+  redis_data:
+  local_uploads:

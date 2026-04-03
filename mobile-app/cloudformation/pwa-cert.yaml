@@ -1,0 +1,26 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: ACM certificate for the Money Coach PWA domain.
+
+Parameters:
+  AppDomainName:
+    Type: String
+    Default: demo.moneycoach.cc
+    Description: Fully qualified domain name for the PWA (e.g. demo.moneycoach.cc).
+  HostedZoneId:
+    Type: String
+    Description: Route53 hosted zone ID for moneycoach.cc.
+
+Resources:
+  PwaCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref AppDomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref AppDomainName
+          HostedZoneId: !Ref HostedZoneId
+
+Outputs:
+  CertificateArn:
+    Description: ACM certificate ARN for the PWA domain.
+    Value: !Ref PwaCertificate

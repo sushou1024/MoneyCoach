@@ -1,0 +1,61 @@
+{
+  "meta_data": {
+    "calculation_id": "calc_test_001"
+  },
+  "valuation_as_of": "2026-01-09T00:00:00Z",
+  "market_data_snapshot_id": "snap_test_001",
+  "user_profile": {
+    "risk_tolerance": "Aggressive",
+    "pain_points": ["Bagholder", "FOMO"],
+    "experience": "Intermediate",
+    "style": "Swing Trading",
+    "markets": ["Crypto", "Stocks"]
+  },
+  "portfolio": {
+    "net_worth_usd": 12450.0,
+    "holdings": [
+      {
+        "asset_key": "crypto:cg:bitcoin",
+        "symbol": "BTC",
+        "asset_type": "crypto",
+        "amount": 0.2,
+        "value_usd": 8000.0
+      },
+      {
+        "asset_key": "crypto:cg:ethereum",
+        "symbol": "ETH",
+        "asset_type": "crypto",
+        "amount": 1.5,
+        "value_usd": 3000.0
+      },
+      {
+        "asset_key": "forex:fx:USD",
+        "symbol": "USD",
+        "asset_type": "forex",
+        "amount": 1450.0,
+        "value_usd": 1450.0
+      }
+    ]
+  },
+  "computed_metrics": {
+    "net_worth_usd": 12450.0,
+    "cash_pct": 0.12,
+    "top_asset_pct": 0.64,
+    "volatility_30d_annualized": 0.88,
+    "max_drawdown_90d": 0.34,
+    "avg_pairwise_corr": 0.72,
+    "health_score_baseline": 45,
+    "volatility_score_baseline": 80,
+    "priced_coverage_pct": 0.92,
+    "metrics_incomplete": false
+  },
+  "fixed_metrics": {
+    "net_worth_usd": 12450.0,
+    "health_score": 45,
+    "health_status": "Critical",
+    "volatility_score": 80
+  },
+  "net_worth_display": 12450.0,
+  "base_currency": "USD",
+  "base_fx_rate_to_usd": 1.0
+}

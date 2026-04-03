@@ -1,0 +1,4 @@
+interface:
+  display_name: "Money Coach iOS Simulator Validation"
+  short_description: "Deploy backend and verify the iOS dev build against production"
+  default_prompt: "Use $moneycoach-ios-simulator-validation to validate Money Coach iOS simulator flows against the deployed backend, including Hermes session injection, deep links, and production endpoint checks."

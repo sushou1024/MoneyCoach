@@ -1,0 +1,118 @@
+{
+  "user_portfolio": {
+    "net_worth_usd": 12450.0,
+    "holdings": [
+      {
+        "asset_key": "crypto:cg:bitcoin",
+        "symbol": "BTC",
+        "asset_type": "crypto",
+        "amount": 0.2,
+        "value_usd": 8000.0
+      },
+      {
+        "asset_key": "crypto:cg:ethereum",
+        "symbol": "ETH",
+        "asset_type": "crypto",
+        "amount": 1.5,
+        "value_usd": 3000.0
+      },
+      {
+        "asset_key": "forex:fx:USD",
+        "symbol": "USD",
+        "asset_type": "forex",
+        "amount": 1450.0,
+        "value_usd": 1450.0
+      }
+    ]
+  },
+  "user_profile": {
+    "markets": ["Crypto", "Stocks"],
+    "experience": "Intermediate",
+    "style": "Swing Trading",
+    "risk_tolerance": "Aggressive"
+  },
+  "previous_teaser": {
+    "meta_data": {
+      "calculation_id": "calc_test_001"
+    },
+    "valuation_as_of": "2026-01-09T00:00:00Z",
+    "market_data_snapshot_id": "snap_test_001",
+    "fixed_metrics": {
+      "net_worth_usd": 12450.0,
+      "health_score": 45,
+      "health_status": "Critical",
+      "volatility_score": 80
+    },
+    "net_worth_display": 12450.0,
+    "base_currency": "USD",
+    "base_fx_rate_to_usd": 1.0,
+    "identified_risks": [
+      {
+        "risk_id": "risk_01",
+        "type": "Liquidity Risk",
+        "severity": "High",
+        "teaser_text": "Your cash buffer is thin, leaving you exposed to..."
+      },
+      {
+        "risk_id": "risk_02",
+        "type": "Concentration Risk",
+        "severity": "High",
+        "teaser_text": "A single asset dominates your net worth, meaning a drawdown would..."
+      },
+      {
+        "risk_id": "risk_03",
+        "type": "Drawdown Risk",
+        "severity": "Medium",
+        "teaser_text": "Recent drawdowns suggest another leg lower could..."
+      }
+    ],
+    "locked_projection": {
+      "potential_upside": "Potential risk reduction (simulated)",
+      "cta": "Unlock Remedial Strategies"
+    }
+  },
+  "locked_plans": [
+    {
+      "plan_id": "plan_01",
+      "strategy_id": "S05",
+      "asset_type": "crypto",
+      "symbol": "BTC",
+      "asset_key": "crypto:cg:bitcoin",
+      "linked_risk_id": "risk_01",
+      "parameters": {
+        "cadence": "weekly",
+        "amount_usd": 200
+      }
+    },
+    {
+      "plan_id": "plan_02",
+      "strategy_id": "S01",
+      "asset_type": "crypto",
+      "symbol": "ETH",
+      "asset_key": "crypto:cg:ethereum",
+      "linked_risk_id": "risk_02",
+      "parameters": {
+        "stop_loss_pct": 0.2
+      }
+    }
+  ],
+  "portfolio_facts": {
+    "net_worth_usd": 12450.0,
+    "cash_pct": 0.12,
+    "top_asset_pct": 0.64,
+    "volatility_30d_annualized": 0.88,
+    "max_drawdown_90d": 0.34,
+    "avg_pairwise_corr": 0.72,
+    "priced_coverage_pct": 0.92,
+    "metrics_incomplete": false
+  },
+  "fixed_metrics": {
+    "net_worth_usd": 12450.0,
+    "health_score": 45,
+    "health_status": "Critical",
+    "volatility_score": 80
+  },
+  "net_worth_display": 12450.0,
+  "base_currency": "USD",
+  "base_fx_rate_to_usd": 1.0
+}

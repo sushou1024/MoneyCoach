@@ -1,0 +1,73 @@
+{
+  "expo": {
+    "name": "Money Coach",
+    "owner": "jackcpku",
+    "slug": "money-coach",
+    "version": "0.1.0",
+    "scheme": "moneycoach",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f7f2ea"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "bundleIdentifier": "cc.moneycoach.app.ios",
+      "usesAppleSignIn": true,
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Allow Money Coach to access your photos for portfolio uploads.",
+        "NSPhotoLibraryAddUsageDescription": "Allow Money Coach to save share cards to your photo library.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "cc.moneycoach.app",
+      "permissions": [
+        "android.permission.VIBRATE",
+        "com.android.vending.BILLING"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0B1120"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png",
+      "name": "Money Coach",
+      "shortName": "Money Coach",
+      "description": "AI portfolio coach for risk and recovery insights."
+    },
+    "plugins": [
+      "expo-router",
+      "expo-notifications",
+      "expo-font",
+      "react-native-iap",
+      "expo-web-browser",
+      "./plugins/withAndroidPlayPolicy"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "45baab6e-9839-4ddf-9a99-c1ce1db76fd7"
+      }
+    }
+  }
+}
