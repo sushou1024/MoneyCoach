@@ -84,6 +84,10 @@ func (s *Server) routes() http.Handler {
 				r.Delete("/dev/entitlement", s.handleBillingDevEntitlementDelete)
 			})
 
+			r.Route("/briefings", func(r chi.Router) {
+				r.Get("/today", s.handleBriefingsToday)
+			})
+
 			r.Route("/insights", func(r chi.Router) {
 				r.Get("/", s.handleInsightsList)
 				r.With(s.withIdempotency).Post("/{insight_id}/execute", s.handleInsightExecute)

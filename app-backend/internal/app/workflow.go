@@ -12,6 +12,7 @@ const (
 	jobPreviewReport   = "preview_report"
 	jobPaidReport      = "paid_report"
 	jobInsightsRefresh = "insights_refresh"
+	jobDailyBriefing   = "daily_briefing"
 )
 
 func (s *Server) processJob(ctx context.Context, job jobPayload) error {
@@ -28,6 +29,8 @@ func (s *Server) processJob(ctx context.Context, job jobPayload) error {
 		return s.processPaidReport(ctx, job.ID)
 	case jobInsightsRefresh:
 		return s.processInsightsRefresh(ctx, job.ID)
+	case jobDailyBriefing:
+		return s.processDailyBriefing(ctx, job.ID)
 	default:
 		return fmt.Errorf("unknown job type %q", job.Type)
 	}

@@ -44,7 +44,7 @@ function AuthGate() {
       wasInAuthRef.current = inAuth
       return
     }
-    if (accessToken && inAuth && onboardingMode !== 'retake') {
+    if (accessToken && inAuth && onboardingMode !== 'retake' && (segments as string[])[1] !== 'sc08') {
       router.replace('/')
     }
     wasInAuthRef.current = inAuth

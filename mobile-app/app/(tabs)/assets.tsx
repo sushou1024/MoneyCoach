@@ -26,6 +26,7 @@ import { useActivePortfolio } from '../../src/hooks/usePortfolio'
 import { useAuth } from '../../src/providers/AuthProvider'
 import { useLocalization } from '../../src/providers/LocalizationProvider'
 import { useTheme } from '../../src/providers/ThemeProvider'
+import { getTodayBriefings } from '../../src/services/briefings'
 import { fetchPortfolioSnapshots, refreshActivePortfolio } from '../../src/services/portfolio'
 import { requestActiveReport, requestPaidReport } from '../../src/services/reports'
 import { PortfolioHolding } from '../../src/types/api'
@@ -57,6 +58,7 @@ export default function AssetsScreen() {
   const entitlement = useEntitlement()
   const [diagnoseSubmitting, setDiagnoseSubmitting] = useState(false)
   const [refreshSubmitting, setRefreshSubmitting] = useState(false)
+  const [pullRefreshing, setPullRefreshing] = useState(false)
 
   const reports = useQuery({
     queryKey: ['reports', 'active', userId],
@@ -85,6 +87,30 @@ export default function AssetsScreen() {
     useCallback(() => {
       portfolioQuery.refetch()
     }, [portfolioQuery.refetch])
+  )
+
+  const briefingsQuery = useQuery({
+    queryKey: ['briefings', 'today', userId],
+    queryFn: async () => {
+      if (!accessToken) return []
+      const resp = await getTodayBriefings(accessToken)
+      if (resp.error) {
+        if (resp.status === 401) {
+          await clearSession()
+          return []
+        }
+        return []
+      }
+      const items = resp.data?.briefings ?? []
+      return [...items].sort((a, b) => a.priority - b.priority)
+    },
+    enabled: !!accessToken,
+  })
+
+  useFocusEffect(
+    useCallback(() => {
+      briefingsQuery.refetch()
+    }, [briefingsQuery.refetch])
   )
 
   const isPaid = ['active', 'grace'].includes(entitlement.data?.status ?? '')
@@ -168,6 +194,19 @@ export default function AssetsScreen() {
     paddingVertical: 6,
     paddingHorizontal: theme.spacing.sm,
   }
+
+  const handlePullRefresh = useCallback(async () => {
+    setPullRefreshing(true)
+    try {
+      await Promise.all([
+        briefingsQuery.refetch(),
+        portfolioQuery.refetch(),
+        reports.refetch(),
+      ])
+    } finally {
+      setPullRefreshing(false)
+    }
+  }, [briefingsQuery.refetch, portfolioQuery.refetch, reports.refetch])
 
   const handleDiagnose = async () => {
     if (!accessToken || diagnoseSubmitting) return
@@ -320,8 +359,110 @@ export default function AssetsScreen() {
     )
   }
 
+  const briefingIconMap: Record<string, keyof typeof Ionicons.glyphMap> = {
+    market_move: 'trending-up',
+    portfolio_change: 'briefcase-outline',
+    risk_alert: 'warning-outline',
+    opportunity: 'flash-outline',
+    education: 'school-outline',
+  }
+
+  const briefingTypeLabelMap: Record<string, string> = {
+    market_move: 'market',
+    portfolio_change: 'portfolio',
+    risk_alert: 'risk',
+    opportunity: 'action',
+    education: 'default',
+  }
+
+  const briefingTypeLabel = (type: string) => {
+    const mapped = briefingTypeLabelMap[type] ?? 'default'
+    const key = `briefing.type.${mapped}` as any
+    const resolved = t(key)
+    return resolved !== key ? resolved : t('briefing.type.default' as any)
+  }
+
+  const briefings = briefingsQuery.data ?? []
+
   return (
-    <Screen scroll>
+    <Screen scroll refreshing={pullRefreshing} onRefresh={handlePullRefresh}>
+      <Card style={{ marginBottom: theme.spacing.md }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.xs }}>
+          <Ionicons name="newspaper-outline" size={18} color={theme.colors.accent} />
+          <Text style={{ fontSize: 16, color: theme.colors.ink, fontFamily: theme.fonts.bodyBold }}>
+            {t('briefing.title' as any)}
+          </Text>
+        </View>
+        {briefingsQuery.isLoading ? (
+          <View style={{ paddingVertical: theme.spacing.md, alignItems: 'center' }}>
+            <ActivityIndicator size="small" color={theme.colors.muted} />
+          </View>
+        ) : briefings.length === 0 ? (
+          <Text
+            style={{
+              marginTop: theme.spacing.sm,
+              color: theme.colors.muted,
+              fontFamily: theme.fonts.body,
+              textAlign: 'center',
+              paddingVertical: theme.spacing.md,
+            }}
+          >
+            {t('briefing.empty' as any)}
+          </Text>
+        ) : (
+          <View style={{ marginTop: theme.spacing.sm, gap: theme.spacing.sm }}>
+            {briefings.map((item, index) => (
+              <View
+                key={`${item.type}-${index}`}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'flex-start',
+                  gap: theme.spacing.sm,
+                  paddingVertical: theme.spacing.xs,
+                  borderTopWidth: index > 0 ? 1 : 0,
+                  borderTopColor: theme.colors.border,
+                }}
+              >
+                <View
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: theme.radius.md,
+                    backgroundColor: theme.colors.accentSoft,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Ionicons
+                    name={briefingIconMap[item.type] ?? 'information-circle-outline'}
+                    size={18}
+                    color={theme.colors.accent}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.xs }}>
+                    <Text style={{ fontSize: 14, color: theme.colors.ink, fontFamily: theme.fonts.bodyBold, flex: 1 }}>
+                      {item.title}
+                    </Text>
+                    <Badge label={briefingTypeLabel(item.type)} tone="neutral" />
+                  </View>
+                  <Text
+                    style={{
+                      marginTop: 2,
+                      fontSize: 13,
+                      color: theme.colors.muted,
+                      fontFamily: theme.fonts.body,
+                      lineHeight: 18,
+                    }}
+                  >
+                    {item.body}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+      </Card>
       <Card>
         <View>
           <Text style={{ color: theme.colors.muted, fontFamily: theme.fonts.body }}>{t('assets.netWorth')}</Text>

@@ -25,6 +25,7 @@ func main() {
 		PaidReportDirect: PaidReportDirectPrompt,
 		AssetCommand:     AssetCommandPrompt,
 		TradeSlipOCR:     TradeSlipOCRPrompt,
+		DailyBriefing:    DailyBriefingPrompt,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -489,3 +489,17 @@ type FXDailyRate struct {
 }
 
 func (FXDailyRate) TableName() string { return "fx_daily_rates" }
+
+type Briefing struct {
+	ID           string    `gorm:"column:id;primaryKey"`
+	UserID       string    `gorm:"column:user_id;index"`
+	Type         string    `gorm:"column:type"`
+	Priority     int       `gorm:"column:priority"`
+	Title        string    `gorm:"column:title"`
+	Body         string    `gorm:"column:body"`
+	PushText     string    `gorm:"column:push_text"`
+	BriefingDate string    `gorm:"column:briefing_date;index"`
+	CreatedAt    time.Time `gorm:"column:created_at"`
+}
+
+func (Briefing) TableName() string { return "briefings" }

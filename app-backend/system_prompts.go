@@ -19,3 +19,6 @@ var AssetCommandPrompt string
 
 //go:embed system-prompts/trade-slip-ocr.txt
 var TradeSlipOCRPrompt string
+
+//go:embed system-prompts/daily-briefing.txt
+var DailyBriefingPrompt string

@@ -273,6 +273,7 @@ func defaultNotificationPrefs() map[string]bool {
 		"portfolio_alerts": true,
 		"market_alpha":     false,
 		"action_alerts":    true,
+		"daily_briefing":   true,
 	}
 }
 

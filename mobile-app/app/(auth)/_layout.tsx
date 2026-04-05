@@ -14,6 +14,7 @@ export default function AuthLayout() {
       <Stack.Screen name="sc06" options={{ animation: 'none' }} />
       <Stack.Screen name="sc07" options={{ animation: 'none' }} />
       <Stack.Screen name="sc07a" options={{ animation: 'none' }} />
+      <Stack.Screen name="sc08" options={{ animation: 'none' }} />
     </Stack>
   )
 }

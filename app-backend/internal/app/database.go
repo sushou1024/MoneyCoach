@@ -58,6 +58,7 @@ func migrateDatabase(ctx context.Context, db *gorm.DB) error {
 		&MarketDataCache{},
 		&MarketCandlestick{},
 		&FXDailyRate{},
+		&Briefing{},
 	); err != nil {
 		return fmt.Errorf("auto migrate: %w", err)
 	}

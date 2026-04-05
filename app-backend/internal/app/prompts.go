@@ -8,4 +8,5 @@ type Prompts struct {
 	PaidReportDirect string
 	AssetCommand     string
 	TradeSlipOCR     string
+	DailyBriefing    string
 }

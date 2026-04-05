@@ -1,5 +1,5 @@
 import React from 'react'
-import { ScrollView, StyleProp, StyleSheet, View, ViewStyle, useWindowDimensions } from 'react-native'
+import { RefreshControl, ScrollView, StyleProp, StyleSheet, View, ViewStyle, useWindowDimensions } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useTheme } from '../providers/ThemeProvider'
@@ -9,9 +9,11 @@ interface ScreenProps {
   style?: StyleProp<ViewStyle>
   scroll?: boolean
   decorativeBackground?: boolean
+  refreshing?: boolean
+  onRefresh?: () => void
 }
 
-export function Screen({ children, style, scroll, decorativeBackground = true }: ScreenProps) {
+export function Screen({ children, style, scroll, decorativeBackground = true, refreshing, onRefresh }: ScreenProps) {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const { width } = useWindowDimensions()
@@ -33,6 +35,11 @@ export function Screen({ children, style, scroll, decorativeBackground = true }:
         style,
       ]}
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        onRefresh ? (
+          <RefreshControl refreshing={refreshing ?? false} onRefresh={onRefresh} tintColor={theme.colors.muted} />
+        ) : undefined
+      }
     >
       {children}
     </ScrollView>

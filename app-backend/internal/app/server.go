@@ -89,6 +89,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	s.queue.startWorkers(workerCtx, s)
 	s.startInsightsScheduler(workerCtx)
+	s.startBriefingScheduler(workerCtx)
 
 	router := s.routes()
 	srv := &http.Server{

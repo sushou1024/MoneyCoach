@@ -1,5 +1,8 @@
+import { Platform } from 'react-native'
+
 import { getCurrentLocale } from './i18n'
 import { fetchEntitlement } from '../services/billing'
+import { getPushPermission } from '../services/notifications'
 import { fetchProfile, updateProfile } from '../services/profile'
 
 interface OnboardingSnapshot {
@@ -40,6 +43,14 @@ export async function finalizeAuthFlow(options: {
   }
 
   onboarding.reset()
+
+  // Show push notification permission page on native if not yet decided
+  if (Platform.OS !== 'web') {
+    const pushState = await getPushPermission()
+    if (pushState.status === 'undetermined') {
+      return '/(auth)/sc08'
+    }
+  }
 
   const entitlementResp = await fetchEntitlement(accessToken)
   if (entitlementResp.data && (entitlementResp.data.status === 'active' || entitlementResp.data.status === 'grace')) {
